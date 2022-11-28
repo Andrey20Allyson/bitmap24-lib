@@ -22,7 +22,7 @@ export class BitMap24 {
         this.length = buffer.readUint32LE(34);
     }
 
-    setPixelColor(x: number, y: number) {
+    drawPixel(x: number, y: number) {
         const pos = this.getIndexFromXY(x, y);
 
         this.buffer.set(this.paintColor, pos);
@@ -48,8 +48,9 @@ export class BitMap24 {
             for (xi; xi < xe; xi++) {
                 const color = this.getPixelColor(xi, yi);
                 
-                for (let i = 0; i < avrColor.length; i++)
+                for (let i = 0; i < avrColor.length; i++) {
                     avrColor[i] += color[i];
+                }
 
                 sums++;
             }
@@ -62,6 +63,16 @@ export class BitMap24 {
         return avrColor;
     }
 
+    getReversePixelColor(x: number, y: number) {
+        const color: Color3 = [255, 255, 255];
+        const lpos = this.getIndexFromXY(x, y) + color.length - 1;
+
+        for (let idx = 0; idx < color.length; idx++)
+            color[idx] -= this.buffer.at(lpos - idx) ?? 0;
+
+        return color;
+    }
+
     clone() {
         return new BitMap24(Buffer.from(this.buffer));
     }
@@ -72,20 +83,28 @@ export class BitMap24 {
         for (let y = 0; y < this.height; y++) {
             for (let x = 0; x < this.width; x++) {
                 newBitMap.setPaintColor(...this.getInterpolatedColor(x, y, range));
-                newBitMap.setPixelColor(x, y);
+                newBitMap.drawPixel(x, y);
             }
         }
 
         this.buffer = newBitMap.buffer;
     }
 
+    reverseColor() {
+        for (let y = 0; y < this.height; y++) {
+            for (let x = 0; x < this.width; x++) {
+                this.setPaintColor(...this.getReversePixelColor(x, y));
+                this.drawPixel(x, y);
+            }
+        }
+    }
+
     getPaintColor() {
         const color: Color3 = [0, 0, 0];
         const lpos = color.length - 1
         
-        for (let i = 0; i < color.length; i++) {
+        for (let i = 0; i < color.length; i++)
             color[i] = this.paintColor[lpos - i];
-        }
 
         return color;
     } 
@@ -130,7 +149,7 @@ export class BitMap24 {
 
     static parseUInt8(x: number) {
         return x < 0?
-            Math.ceil(-x / 256) * 256 + x:
+            Math.trunc(Math.ceil(-x / 256) * 256 + x):
             x % 256; 
     }
 
