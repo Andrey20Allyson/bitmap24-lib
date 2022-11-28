@@ -4,63 +4,104 @@ import path from 'path';
 type Color3 = [number, number, number];
 
 export class BitMap24 {
-    static FIRST_PIXEL_INDEX = 54;
-    buffer: Buffer;
-    paintColor: Color3;
+    private static FIRST_PIXEL_INDEX = 54;
+
+    private buffer: Buffer;
+    private paintColor: Color3;
+
+    private width: number;
+    private height: number;
+    private length: number;
 
     constructor(buffer: Buffer) {
         this.buffer = buffer;
         this.paintColor = [0, 0, 0];
+
+        this.width = buffer.readUint32LE(18);
+        this.height = buffer.readUint32LE(22);
+        this.length = buffer.readUint32LE(34);
     }
 
     setPixelColor(x: number, y: number) {
         const pos = this.getIndexFromXY(x, y);
 
-        for (let idx = 0; idx < this.paintColor.length; idx++) {
-            // this.buffer[pos + this.paintColor.length - 1 - idx] = val;
-            this.buffer[pos + idx] = this.paintColor[idx];
-        }
+        this.buffer.set(this.paintColor, pos);
     }
 
     setPaintColor(r: number, g: number, b: number) {
-        this.paintColor[0] = r < 0? 0: r > 255? 255: r;
-        this.paintColor[1] = g < 0? 0: g > 255? 255: g;
-        this.paintColor[2] = b < 0? 0: b > 255? 255: b;
+        this.paintColor[2] = BitMap24.parseUInt8(r);
+        this.paintColor[1] = BitMap24.parseUInt8(g);
+        this.paintColor[0] = BitMap24.parseUInt8(b);
+    }
+
+    getInterpolatedColor(x: number, y: number, range: number) {
+        let xi = x - range >= 0? x - range: 0;
+        let yi = y - range >= 0? y - range: 0;
+
+        const xe = x + range + 1 < this.width? x + range + 1: this.width;
+        const ye = y + range + 1 < this.height? y + range + 1: this.height;
+
+        const avrColor: Color3 = [0, 0, 0];
+        let sums = 0;
+
+        for (yi; yi < ye; yi++) {
+            for (xi; xi < xe; xi++) {
+                const color = this.getPixelColor(xi, yi);
+                
+                for (let i = 0; i < avrColor.length; i++)
+                    avrColor[i] += color[i];
+
+                sums++;
+            }
+        }
+
+        for (let i = 0; i < avrColor.length; i++) {
+            avrColor[i] = Math.trunc(avrColor[i] / sums);
+        }
+
+        return avrColor;
+    }
+
+    clone() {
+        return new BitMap24(Buffer.from(this.buffer));
+    }
+
+    blur(range: number) {
+        const newBitMap = this.clone();
+
+        for (let y = 0; y < this.height; y++) {
+            for (let x = 0; x < this.width; x++) {
+                newBitMap.setPaintColor(...this.getInterpolatedColor(x, y, range));
+                newBitMap.setPixelColor(x, y);
+            }
+        }
+
+        this.buffer = newBitMap.buffer;
     }
 
     getPaintColor() {
-        return this.paintColor.slice(0);
+        const color: Color3 = [0, 0, 0];
+        const lpos = color.length - 1
+        
+        for (let i = 0; i < color.length; i++) {
+            color[i] = this.paintColor[lpos - i];
+        }
+
+        return color;
     } 
 
     getPixelColor(x: number, y: number) {
-        if (x + y * this.width > this.width * this.length) {
-            throw new Error('fora da caixa!');
-        }
+        const color: Color3 = [0, 0, 0];
+        const lpos = this.getIndexFromXY(x, y) + color.length - 1;
 
-        const pos = this.getIndexFromXY(x, y);
-        const color = [];
-
-        for (let idx = 0; idx < 3; idx++) {
-            color.push(this.buffer[pos + 3 - 1 - idx]);
-        }
+        for (let idx = 0; idx < color.length; idx++)
+            color[idx] = this.buffer.at(lpos - idx) ?? 0;
 
         return color;
     }
 
     createImg(name: string, dir = './') {
         fs.writeFile(path.join(dir, `${name}.bmp`), this.buffer);
-    }
-
-    get width() {
-        return this.buffer.readUint32LE(18);
-    }
-
-    get height() {
-        return this.buffer.readUint32LE(22);
-    }
-
-    get length() {
-        return this.buffer.readUint32LE(34);
     }
 
     getIndexFromXY(x: number, y: number) {
@@ -73,6 +114,24 @@ export class BitMap24 {
             y * (width % 4);
 
         return pos;
+    }
+
+    getWidth() {
+        return this.width;    
+    }
+
+    getHeiht() {
+        return this.height;
+    }
+
+    getLength() {
+        return this.length;
+    }
+
+    static parseUInt8(x: number) {
+        return x < 0?
+            Math.ceil(-x / 256) * 256 + x:
+            x % 256; 
     }
 
     static async fromImg(path: string) {
